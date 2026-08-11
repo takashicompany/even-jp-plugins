@@ -2,7 +2,7 @@ name: Build registry
 
 on:
   issues:
-    types: [opened, edited, reopened, closed, deleted, labeled, unlabeled]
+    types: [opened, edited, reopened, closed, deleted, labeled, unlabeled, transferred]
   workflow_dispatch:
 
 permissions:
@@ -16,11 +16,15 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # push時のリベースに備えて全履歴を取得する（リポジトリは小さい）
+          # イベント発生時点のSHAではなくデフォルトブランチの最新を取得する
+          ref: ${{ github.event.repository.default_branch }}
+          # push競合時のリベース・再生成に備えて全履歴を取得する（リポジトリは小さい）
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -30,29 +34,37 @@ jobs:
 
       # Issue由来の文字列（title / body など）は run: に一切展開しない。
       # スクリプトがGitHub APIから直接取得し、Node内だけで処理する。
-      - name: Build registry.json
+      - name: Build and push registry.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node scripts/build-registry.mjs
-
-      - name: Commit and push if changed
         run: |
-          set -euo pipefail
-          if git diff --quiet -- registry.json; then
-            echo "registry.json に差分はありません"
-            exit 0
-          fi
+          set -uo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add registry.json
-          git commit -m "chore: registry.json を更新"
-          # 別の実行が先にpushしていた場合に備えてリベースしつつ数回リトライする
-          for i in 1 2 3; do
-            if git push; then
+
+          for attempt in 1 2 3; do
+            node scripts/build-registry.mjs || exit 1
+
+            if git diff --quiet -- registry.json; then
+              echo "registry.json に差分はありません"
               exit 0
             fi
-            git pull --rebase --autostash
+
+            git add registry.json
+            git commit -m "chore: registry.json を更新" || exit 1
+
+            if git push origin "HEAD:${DEFAULT_BRANCH}"; then
+              echo "push しました"
+              exit 0
+            fi
+
+            # 別の実行が先にpushしていた場合は、最新の先端から作り直して再試行する
+            echo "push に失敗しました。最新の ${DEFAULT_BRANCH} から再生成します (attempt ${attempt})"
+            git fetch origin "${DEFAULT_BRANCH}" || exit 1
+            git reset --hard "origin/${DEFAULT_BRANCH}" || exit 1
           done
-          echo "push に失敗しました"
+
+          echo "3回試しましたが push できませんでした"
           exit 1

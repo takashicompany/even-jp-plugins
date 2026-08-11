@@ -64,6 +64,9 @@ https://raw.githubusercontent.com/takashicompany/even-jp-plugins/main/registry.j
 - `scripts/build-registry.mjs` — `plugin` ラベルが付いた open な Issue を集めて `registry.json` を生成
 - `.github/workflows/registry.yml` — Issue の作成・編集・close 等をきっかけに上記を実行し、差分があればコミット
 
+Issue フォームは `plugin` ラベルを自動で付けますが、これはリポジトリに `plugin` ラベルが存在していることが前提です
+（GitHub の Issue Forms は存在しないラベルを作成しません）。ラベルを消さないでください。
+
 ローカルでパース処理のテストを実行する場合:
 
 ```

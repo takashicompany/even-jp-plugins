@@ -26,13 +26,27 @@ export const LIMITS = {
 const NO_RESPONSE = new Set(['_No response_', '_不明_', '_なし_']);
 
 /**
+ * 文字数を数える（絵文字などのサロゲートペアを1文字として数える）。
+ * @param {string} value
+ * @returns {number}
+ */
+export function countChars(value) {
+  return Array.from(value).length;
+}
+
+/**
  * Issue Formが生成する `### 見出し` 区切りのMarkdownを { 見出し: 値 } に分解する。
+ * 見出しとして扱うのは knownLabels に含まれるものだけ。
+ * こうしないと説明欄にユーザーが書いた `### 何か` で本文が途切れてしまう。
  * @param {string} body
+ * @param {string[]} knownLabels
  * @returns {Record<string, string>}
  */
-export function parseIssueBody(body) {
+export function parseIssueBody(body, knownLabels = Object.values(FIELD_LABELS)) {
   const sections = {};
   if (typeof body !== 'string') return sections;
+
+  const known = new Set(knownLabels);
 
   // 改行コードを正規化（CRLF / CR）
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
@@ -50,7 +64,7 @@ export function parseIssueBody(body) {
 
   for (const line of lines) {
     const m = /^###\s+(.*\S)\s*$/.exec(line);
-    if (m) {
+    if (m && known.has(m[1].trim())) {
       flush();
       currentKey = m[1].trim();
     } else if (currentKey !== null) {
@@ -77,17 +91,25 @@ export function normalizeValue(value) {
 
 /**
  * http(s) の絶対URLかどうかを判定する。
+ * `https:example.com` のようにホスト名を欠くものは不正扱いにする。
  * @param {string} value
  * @returns {boolean}
  */
 export function isValidHttpUrl(value) {
+  // 先頭が http:// または https:// であることを明示的に要求する
+  if (!/^https?:\/\//i.test(value)) return false;
+  // 空白や制御文字を含むURLは受け付けない
+  if (/[\s\u0000-\u001f\u007f]/.test(value)) return false;
+
   let parsed;
   try {
     parsed = new URL(value);
   } catch {
     return false;
   }
-  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (!parsed.hostname) return false;
+  return true;
 }
 
 /**
@@ -105,8 +127,9 @@ export function buildEntry(issue) {
   const author = normalizeValue(sections[FIELD_LABELS.author]);
 
   if (!name) return { error: `「${FIELD_LABELS.name}」が見つからないか空です` };
-  if (name.length > LIMITS.name) {
-    return { error: `「${FIELD_LABELS.name}」が${LIMITS.name}文字を超えています (${name.length}文字)` };
+  const nameLength = countChars(name);
+  if (nameLength > LIMITS.name) {
+    return { error: `「${FIELD_LABELS.name}」が${LIMITS.name}文字を超えています (${nameLength}文字)` };
   }
 
   if (!url) return { error: `「${FIELD_LABELS.url}」が見つからないか空です` };
@@ -115,14 +138,17 @@ export function buildEntry(issue) {
   }
 
   if (!description) return { error: `「${FIELD_LABELS.description}」が見つからないか空です` };
-  if (description.length > LIMITS.description) {
+  const descriptionLength = countChars(description);
+  if (descriptionLength > LIMITS.description) {
     return {
-      error: `「${FIELD_LABELS.description}」が${LIMITS.description}文字を超えています (${description.length}文字)`,
+      error: `「${FIELD_LABELS.description}」が${LIMITS.description}文字を超えています (${descriptionLength}文字)`,
     };
   }
 
-  if (author && author.length > LIMITS.author) {
-    return { error: `「${FIELD_LABELS.author}」が${LIMITS.author}文字を超えています (${author.length}文字)` };
+  if (author && countChars(author) > LIMITS.author) {
+    return {
+      error: `「${FIELD_LABELS.author}」が${LIMITS.author}文字を超えています (${countChars(author)}文字)`,
+    };
   }
 
   const githubUser = issue.user && typeof issue.user.login === 'string' ? issue.user.login : null;
@@ -165,44 +191,110 @@ export function buildPlugins(issues, onSkip = () => {}) {
 }
 
 /**
+ * Link ヘッダーから rel="next" のURLを取り出す。
+ * @param {string | null} header
+ * @returns {string | null}
+ */
+export function parseNextLink(header) {
+  if (!header) return null;
+  for (const part of header.split(',')) {
+    const m = /^\s*<([^>]+)>\s*;\s*(.+)$/.exec(part);
+    if (!m) continue;
+    if (/rel\s*=\s*"?next"?/i.test(m[2])) return m[1];
+  }
+  return null;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * レート制限・一時障害に対して上限付きで再試行するfetch。
+ */
+async function requestWithRetry(url, token, attempts = 4) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'even-jp-plugins-registry-builder',
+        },
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      res = null;
+    }
+
+    if (res && res.ok) return res;
+
+    if (res) {
+      // 403はレート制限のときだけ再試行する（権限不足は即エラーにする）
+      const rateLimited =
+        res.status === 429 ||
+        (res.status === 403 &&
+          (res.headers.get('retry-after') !== null || res.headers.get('x-ratelimit-remaining') === '0'));
+      const retryable = rateLimited || res.status >= 500;
+      if (!retryable || attempt === attempts) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`GitHub API error: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
+      }
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const reset = Number(res.headers.get('x-ratelimit-reset'));
+      let waitMs = 2000 * attempt;
+      if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        waitMs = Math.min(retryAfter * 1000, 60000);
+      } else if (Number.isFinite(reset) && reset > 0) {
+        waitMs = Math.min(Math.max(reset * 1000 - Date.now(), 0) + 1000, 60000);
+      }
+      console.log(`APIが ${res.status} を返しました。${Math.round(waitMs / 1000)}秒待って再試行します`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (attempt === attempts) throw lastError ?? new Error('GitHub API request failed');
+    await sleep(2000 * attempt);
+  }
+
+  throw lastError ?? new Error('GitHub API request failed');
+}
+
+/**
  * label=plugin / state=open のIssueをページネーション対応で全件取得する。
+ * Link ヘッダーの rel="next" を辿るため、件数の上限を切り捨てで見落とすことはない。
  * @param {{ token: string, repository: string }} options
  * @returns {Promise<object[]>}
  */
 export async function fetchIssues({ token, repository }) {
   const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
-  const perPage = 100;
+  const MAX_PAGES = 500;
   const all = [];
 
-  for (let page = 1; page <= 100; page++) {
-    const url = new URL(`${apiBase}/repos/${repository}/issues`);
-    url.searchParams.set('labels', 'plugin');
-    url.searchParams.set('state', 'open');
-    url.searchParams.set('per_page', String(perPage));
-    url.searchParams.set('page', String(page));
-    url.searchParams.set('sort', 'created');
-    url.searchParams.set('direction', 'asc');
+  const first = new URL(`${apiBase}/repos/${repository}/issues`);
+  first.searchParams.set('labels', 'plugin');
+  first.searchParams.set('state', 'open');
+  first.searchParams.set('per_page', '100');
+  first.searchParams.set('sort', 'created');
+  first.searchParams.set('direction', 'asc');
 
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'even-jp-plugins-registry-builder',
-      },
-    });
+  let next = first.toString();
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`GitHub API error: ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
+  for (let page = 1; next; page++) {
+    if (page > MAX_PAGES) {
+      // 途中で打ち切ったregistryを正常扱いで書き出さないため、必ずエラーにする
+      throw new Error(`ページ数が上限(${MAX_PAGES})を超えました。全件取得に失敗しています`);
     }
 
+    const res = await requestWithRetry(next, token);
     const batch = await res.json();
     if (!Array.isArray(batch)) {
       throw new Error('GitHub API error: unexpected response shape');
     }
     all.push(...batch);
-    if (batch.length < perPage) break;
+    next = parseNextLink(res.headers.get('link'));
   }
 
   return all;
