@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Hello Even</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <main id="app">
+    <header class="app-header">
+      <h1>Hello Even</h1>
+      <p class="muted">これはeven-jp-pluginsレジストリのテスト用サンプルです</p>
+    </header>
+
+    <section class="card">
+      <h2>ステータス</h2>
+      <div class="status-row"><span class="status-label">Bridge</span><span id="bridgeStatus" class="status-value">確認中…</span></div>
+      <div class="status-row"><span class="status-label">Origin</span><span id="pageOrigin" class="status-value">-</span></div>
+    </section>
+
+    <section class="card">
+      <h2>カウンター</h2>
+      <div class="counter" id="counterValue">0</div>
+      <p class="muted center">G2をタップ、または下のボタンで加算します。<br />G2をダブルタップすると終了します。</p>
+      <div class="form-actions">
+        <button id="incrementBtn" type="button" class="primary">+1</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>ログ</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
