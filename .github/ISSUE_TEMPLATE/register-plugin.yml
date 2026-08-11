@@ -1,0 +1,43 @@
+name: プラグイン登録
+description: 開発中・完成済みのEven Hubプラグインを登録します
+title: "[plugin] "
+labels: ["plugin"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Even Hubプラグインをレジストリに登録します。
+        このIssueを作成すると自動的に `registry.json` へ反映されます。
+        取り下げたい場合はこのIssueをcloseしてください。内容を変更したい場合はIssue本文を編集してください。
+  - type: input
+    id: name
+    attributes:
+      label: プラグイン名
+      description: 100文字以内で入力してください。
+      placeholder: My Awesome Plugin
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: プラグインのURL
+      description: https:// から始まる絶対URLを入力してください。
+      placeholder: https://example.com/my-plugin/
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 説明
+      description: 500文字以内で入力してください。
+      placeholder: このプラグインが何をするものかを説明してください。
+    validations:
+      required: true
+  - type: input
+    id: author
+    attributes:
+      label: 作者名
+      description: 任意です。未入力の場合はIssue投稿者のGitHubアカウント名が使われます。
+      placeholder: takashicompany
+    validations:
+      required: false
