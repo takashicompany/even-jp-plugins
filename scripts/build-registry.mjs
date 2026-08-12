@@ -163,6 +163,8 @@ export function buildEntry(issue) {
       githubUser,
       createdAt: issue.created_at ?? null,
       updatedAt: issue.updated_at ?? null,
+      // 並び順に使う「本文の最終編集日時」。未編集ならIssue作成日時。
+      bodyUpdatedAt: issue.body_updated_at ?? issue.created_at ?? null,
     },
   };
 }
@@ -176,7 +178,7 @@ export function buildEntry(issue) {
 export function buildPlugins(issues, onSkip = () => {}) {
   const plugins = [];
   for (const issue of issues) {
-    // Pull Request は issues API にも含まれるため除外する
+    // Pull Request は REST の issues にも含まれるため念のため除外する
     if (issue.pull_request) continue;
 
     const result = buildEntry(issue);
@@ -186,43 +188,37 @@ export function buildPlugins(issues, onSkip = () => {}) {
     }
     plugins.push(result.entry);
   }
-  plugins.sort((a, b) => a.issue - b.issue);
-  return plugins;
-}
 
-/**
- * Link ヘッダーから rel="next" のURLを取り出す。
- * @param {string | null} header
- * @returns {string | null}
- */
-export function parseNextLink(header) {
-  if (!header) return null;
-  for (const part of header.split(',')) {
-    const m = /^\s*<([^>]+)>\s*;\s*(.+)$/.exec(part);
-    if (!m) continue;
-    if (/rel\s*=\s*"?next"?/i.test(m[2])) return m[1];
-  }
-  return null;
+  // 本文の最終編集日時が新しい順。同時刻ならIssue番号の大きい方を先にする。
+  plugins.sort((a, b) => {
+    const ta = Date.parse(a.bodyUpdatedAt ?? '') || 0;
+    const tb = Date.parse(b.bodyUpdatedAt ?? '') || 0;
+    if (tb !== ta) return tb - ta;
+    return b.issue - a.issue;
+  });
+  return plugins;
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * レート制限・一時障害に対して上限付きで再試行するfetch。
+ * レート制限・一時障害に対して上限付きで再試行するGraphQL POST。
  */
-async function requestWithRetry(url, token, attempts = 4) {
+async function requestWithRetry(url, token, payload, attempts = 4) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     let res;
     try {
       res = await fetch(url, {
+        method: 'POST',
         headers: {
           Accept: 'application/vnd.github+json',
           Authorization: `Bearer ${token}`,
-          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
           'User-Agent': 'even-jp-plugins-registry-builder',
         },
+        body: JSON.stringify(payload),
       });
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -262,39 +258,93 @@ async function requestWithRetry(url, token, attempts = 4) {
   throw lastError ?? new Error('GitHub API request failed');
 }
 
+// 本文の最終編集日時 (lastEditedAt) はREST APIでは取れないためGraphQLで取得する。
+// REST の updated_at はコメントやclose/reopenでも動いてしまう。
+const ISSUES_QUERY = `
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(
+      first: 100
+      after: $cursor
+      states: OPEN
+      labels: ["plugin"]
+      orderBy: { field: CREATED_AT, direction: ASC }
+    ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        number
+        body
+        createdAt
+        updatedAt
+        lastEditedAt
+        author {
+          login
+        }
+      }
+    }
+  }
+}`;
+
+/**
+ * GraphQLのIssueノードを、このスクリプト内で扱う形に変換する。
+ * @param {object} node
+ * @returns {object}
+ */
+export function normalizeIssueNode(node) {
+  return {
+    number: node.number,
+    body: node.body,
+    user: node.author && typeof node.author.login === 'string' ? { login: node.author.login } : null,
+    created_at: node.createdAt ?? null,
+    updated_at: node.updatedAt ?? null,
+    // 本文が一度も編集されていない場合 lastEditedAt は null になるので作成日時で代用する
+    body_updated_at: node.lastEditedAt ?? node.createdAt ?? null,
+  };
+}
+
 /**
  * label=plugin / state=open のIssueをページネーション対応で全件取得する。
- * Link ヘッダーの rel="next" を辿るため、件数の上限を切り捨てで見落とすことはない。
+ * GraphQLのissues接続はPull Requestを含まない。
  * @param {{ token: string, repository: string }} options
  * @returns {Promise<object[]>}
  */
 export async function fetchIssues({ token, repository }) {
-  const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
+  const apiBase = process.env.GITHUB_GRAPHQL_URL || 'https://api.github.com/graphql';
+  const [owner, name] = repository.split('/');
   const MAX_PAGES = 500;
   const all = [];
 
-  const first = new URL(`${apiBase}/repos/${repository}/issues`);
-  first.searchParams.set('labels', 'plugin');
-  first.searchParams.set('state', 'open');
-  first.searchParams.set('per_page', '100');
-  first.searchParams.set('sort', 'created');
-  first.searchParams.set('direction', 'asc');
+  let cursor = null;
 
-  let next = first.toString();
-
-  for (let page = 1; next; page++) {
+  for (let page = 1; ; page++) {
     if (page > MAX_PAGES) {
       // 途中で打ち切ったregistryを正常扱いで書き出さないため、必ずエラーにする
       throw new Error(`ページ数が上限(${MAX_PAGES})を超えました。全件取得に失敗しています`);
     }
 
-    const res = await requestWithRetry(next, token);
-    const batch = await res.json();
-    if (!Array.isArray(batch)) {
-      throw new Error('GitHub API error: unexpected response shape');
+    const res = await requestWithRetry(apiBase, token, {
+      query: ISSUES_QUERY,
+      variables: { owner, name, cursor },
+    });
+    const json = await res.json();
+
+    if (json.errors && json.errors.length > 0) {
+      const message = json.errors.map((e) => e.message).join(' / ');
+      throw new Error(`GitHub GraphQL error: ${message.slice(0, 300)}`);
     }
-    all.push(...batch);
-    next = parseNextLink(res.headers.get('link'));
+
+    const connection = json.data && json.data.repository && json.data.repository.issues;
+    if (!connection || !Array.isArray(connection.nodes)) {
+      throw new Error('GitHub GraphQL error: unexpected response shape');
+    }
+
+    all.push(...connection.nodes.filter(Boolean).map(normalizeIssueNode));
+
+    if (!connection.pageInfo || !connection.pageInfo.hasNextPage) break;
+    cursor = connection.pageInfo.endCursor;
   }
 
   return all;
@@ -317,7 +367,10 @@ async function main() {
   console.log(`取得したIssue: ${issues.length}件`);
 
   const plugins = buildPlugins(issues, (message) => console.log(message));
-  console.log(`登録されたプラグイン: ${plugins.length}件`);
+  console.log(`登録されたプラグイン: ${plugins.length}件（本文の最終編集日時が新しい順）`);
+  for (const plugin of plugins) {
+    console.log(`  #${plugin.issue} bodyUpdatedAt=${plugin.bodyUpdatedAt} ${plugin.name}`);
+  }
 
   const outPath = path.resolve(process.cwd(), 'registry.json');
 

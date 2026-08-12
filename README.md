@@ -50,18 +50,24 @@ https://raw.githubusercontent.com/takashicompany/even-jp-plugins/main/registry.j
       "author": "作者名",
       "githubUser": "Issue投稿者のGitHubアカウント名",
       "createdAt": "2026-08-01T00:00:00Z",
-      "updatedAt": "2026-08-02T00:00:00Z"
+      "updatedAt": "2026-08-02T00:00:00Z",
+      "bodyUpdatedAt": "2026-08-02T00:00:00Z"
     }
   ]
 }
 ```
 
-`plugins` は Issue 番号の昇順で並びます。
+`plugins` は `bodyUpdatedAt`（Issue 本文の最終編集日時）が新しい順に並びます。
+つまり Issue 本文を編集すると一覧の先頭に来ます。コメントの追加や close / reopen では順番は変わりません。
+本文を一度も編集していない場合は Issue の作成日時が使われます。日時が同じ場合は Issue 番号の大きい方が先です。
+
+- `updatedAt`（各プラグイン） … Issue の更新日時。コメント等でも動きます
+- `bodyUpdatedAt` … 本文の最終編集日時。並び順に使われます
 
 ## 仕組み
 
 - `.github/ISSUE_TEMPLATE/register-plugin.yml` — 登録用の Issue フォーム（`plugin` ラベルが自動で付きます）
-- `scripts/build-registry.mjs` — `plugin` ラベルが付いた open な Issue を集めて `registry.json` を生成
+- `scripts/build-registry.mjs` — `plugin` ラベルが付いた open な Issue を GraphQL API で集めて `registry.json` を生成（本文の最終編集日時は GraphQL でしか取得できないため）
 - `.github/workflows/registry.yml` — Issue の作成・編集・close 等をきっかけに上記を実行し、差分があればコミット
 
 Issue フォームは `plugin` ラベルを自動で付けますが、これはリポジトリに `plugin` ラベルが存在していることが前提です
