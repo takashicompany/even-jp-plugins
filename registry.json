@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-11T12:22:04.126Z",
+  "updatedAt": "2026-08-12T00:10:04.300Z",
   "plugins": [
     {
       "issue": 1,
@@ -10,7 +10,8 @@
       "author": "テストでつくったマン",
       "githubUser": "subuntu89",
       "createdAt": "2026-08-11T09:22:22Z",
-      "updatedAt": "2026-08-11T12:21:54Z"
+      "updatedAt": "2026-08-11T12:21:54Z",
+      "bodyUpdatedAt": "2026-08-11T12:21:54Z"
     }
   ]
 }
