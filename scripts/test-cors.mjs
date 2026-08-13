@@ -253,7 +253,7 @@ test('decideComment: NGは未解決の間1回だけ、解決も1回だけ', () =
   assert.equal(decideComment(null, true), null);
 });
 
-test('buildNgComment: マーカー・URL・理由・各サービスの直し方を含む', () => {
+test('buildNgComment: マーカー・URL・検出結果・CORSの説明を含む', () => {
   const body = buildNgComment({
     url: 'https://example.com/p/',
     result: {
@@ -264,15 +264,36 @@ test('buildNgComment: マーカー・URL・理由・各サービスの直し方�
   });
   assert.ok(body.startsWith(COMMENT_MARKER_NG));
   assert.ok(body.includes('https://example.com/p/'));
+  // 検出結果
   assert.ok(body.includes('ホスティングがCORS未対応のため起動できません'));
-  assert.ok(body.includes('Cloudflare Workers'));
-  assert.ok(body.includes('Netlify'));
-  assert.ok(body.includes('GitHub Pages'));
-  assert.ok(body.includes('_headers'));
-  assert.ok(body.includes('Access-Control-Allow-Origin: *'));
-  assert.ok(body.includes('https://developers.cloudflare.com/workers/static-assets/headers/'));
-  assert.ok(body.includes('https://docs.netlify.com/manage/routing/headers/'));
+  assert.ok(body.includes('ACAOがありません'));
+  assert.ok(body.includes('HTTP 200'));
+  // なぜCORSが必要かの説明
+  assert.ok(body.includes('なぜCORSが必要か'));
+  assert.ok(body.includes('Access-Control-Allow-Origin'));
+  // 再チェックの案内は1行だけ残す
   assert.ok(body.includes('本文を編集'));
+  assert.ok(body.includes('次回の自動生成'));
+});
+
+test('buildNgComment: 具体的な直し方（各サービスの設定例）は含めない', () => {
+  const body = buildNgComment({
+    url: 'https://example.com/p/',
+    result: { reason: 'ホスティングがCORS未対応のため起動できません', detail: '', hops: [] },
+  });
+  for (const forbidden of [
+    '_headers',
+    'Netlify',
+    'netlify',
+    'Cloudflare',
+    'GitHub Pages',
+    'netlify.toml',
+    'wrangler',
+    '直し方',
+    'Access-Control-Allow-Origin: *',
+  ]) {
+    assert.ok(!body.includes(forbidden), `「${forbidden}」への言及が残っています`);
+  }
 });
 
 test('buildOkComment: マーカーと解決文言を含む', () => {
