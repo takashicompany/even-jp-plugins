@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-13T08:37:59.511Z",
+  "updatedAt": "2026-08-13T09:37:43.334Z",
   "plugins": [
     {
       "issue": 2,
       "name": "試作レティクル",
       "url": "https://lensight.tksc.workers.dev/",
-      "description": "レンズにレティクルを表示します。\nWebViewでレティクル画像を組み合わせましょう。\n気分はスナイパー！",
+      "description": "【エラー: ホスティングがCORS未対応のため起動できません】レンズにレティクルを表示します。\nWebViewでレティクル画像を組み合わせましょう。\n気分はスナイパー！",
       "author": "takashicompany",
       "githubUser": "takashicompany",
       "createdAt": "2026-08-13T08:37:46Z",
