@@ -21,7 +21,9 @@ body:
     id: url
     attributes:
       label: プラグインのURL
-      description: https:// から始まる絶対URLを入力してください。
+      description: |
+        https:// から始まる絶対URLを入力してください。
+        ホスティングはCORS対応が必要です（HTML・JSの応答に Access-Control-Allow-Origin ヘッダが付くこと。GitHub Pages は既定で対応済み）。未対応の場合は登録後の自動チェックでエラー表記が付きます。
       placeholder: https://example.com/my-plugin/
     validations:
       required: true
