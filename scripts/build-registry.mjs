@@ -10,6 +10,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import {
+  applyCheckResultToDescription,
+  buildNgComment,
+  buildOkComment,
+  checkUrlCors,
+  decideComment,
+  lastBotCommentKind,
+} from './cors-check.mjs';
+
 export const FIELD_LABELS = {
   name: 'プラグイン名',
   url: 'プラグインのURL',
@@ -202,23 +211,29 @@ export function buildPlugins(issues, onSkip = () => {}) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * レート制限・一時障害に対して上限付きで再試行するGraphQL POST。
+ * レート制限・一時障害に対して上限付きで再試行するGitHub APIリクエスト。
+ * @param {string} url
+ * @param {string} token
+ * @param {object | null} payload JSONボディ。null ならボディなし
+ * @param {{ method?: string, attempts?: number }} [options]
  */
-async function requestWithRetry(url, token, payload, attempts = 4) {
+async function requestWithRetry(url, token, payload, options = {}) {
+  const method = options.method ?? 'POST';
+  const attempts = options.attempts ?? 4;
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     let res;
     try {
       res = await fetch(url, {
-        method: 'POST',
+        method,
         headers: {
           Accept: 'application/vnd.github+json',
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           'User-Agent': 'even-jp-plugins-registry-builder',
         },
-        body: JSON.stringify(payload),
+        body: payload === null || payload === undefined ? undefined : JSON.stringify(payload),
       });
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -350,6 +365,112 @@ export async function fetchIssues({ token, repository }) {
   return all;
 }
 
+/**
+ * 各プラグインの登録URLをチェックし、NGなら description の先頭にエラー表記を付ける。
+ * plugins は破壊的に書き換える。
+ * @param {object[]} plugins
+ * @param {{ check?: (url: string) => Promise<object>, onLog?: (message: string) => void }} [options]
+ * @returns {Promise<{ issue: number, url: string, result: object }[]>}
+ */
+export async function annotatePlugins(plugins, options = {}) {
+  const timeoutEnv = Number(process.env.CORS_CHECK_TIMEOUT_MS);
+  const checkOptions = {
+    ...(Number.isFinite(timeoutEnv) && timeoutEnv > 0 ? { timeoutMs: timeoutEnv } : {}),
+    ...(process.env.CORS_CHECK_ORIGIN ? { origin: process.env.CORS_CHECK_ORIGIN } : {}),
+  };
+  const check = options.check ?? ((url) => checkUrlCors(url, checkOptions));
+  const onLog = options.onLog ?? (() => {});
+  const results = [];
+  // 同じURLが複数登録されていても実アクセスは1回で済ませる
+  const cache = new Map();
+
+  for (const plugin of plugins) {
+    let result = cache.get(plugin.url);
+    if (!result) {
+      try {
+        result = await check(plugin.url);
+      } catch (err) {
+        result = {
+          ok: false,
+          reason: 'URLのチェックに失敗しました',
+          detail: err instanceof Error ? err.message : String(err),
+          hops: [],
+        };
+      }
+      cache.set(plugin.url, result);
+    }
+
+    if (result.ok) {
+      onLog(`check ok: #${plugin.issue} ${plugin.url}`);
+    } else {
+      onLog(`check ng: #${plugin.issue} ${plugin.url} - ${result.reason}`);
+      plugin.description = applyCheckResultToDescription(plugin.description, result);
+    }
+    results.push({ issue: plugin.issue, url: plugin.url, result });
+  }
+
+  return results;
+}
+
+/**
+ * Issueのコメントを全件取得する。
+ * @param {{ token: string, repository: string, issueNumber: number }} options
+ * @returns {Promise<{ body: string }[]>}
+ */
+export async function fetchIssueComments({ token, repository, issueNumber }) {
+  const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
+  const MAX_PAGES = 100;
+  const all = [];
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const url = `${apiBase}/repos/${repository}/issues/${issueNumber}/comments?per_page=100&page=${page}`;
+    const res = await requestWithRetry(url, token, null, { method: 'GET' });
+    const json = await res.json();
+    if (!Array.isArray(json)) throw new Error('GitHub API error: unexpected comments response shape');
+    all.push(...json);
+    if (json.length < 100) break;
+  }
+
+  return all;
+}
+
+/**
+ * Issueにコメントを投稿する。
+ * @param {{ token: string, repository: string, issueNumber: number, body: string }} options
+ */
+export async function postIssueComment({ token, repository, issueNumber, body }) {
+  const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
+  const url = `${apiBase}/repos/${repository}/issues/${issueNumber}/comments`;
+  await requestWithRetry(url, token, { body }, { method: 'POST' });
+}
+
+/**
+ * チェック結果に応じてIssueへコメントする。
+ * 同じ状態が続いている間は重複投稿しない（既存コメントの最後のbotコメント種別で判定）。
+ */
+async function syncIssueComments({ token, repository, results }) {
+  for (const { issue, url, result } of results) {
+    let comments;
+    try {
+      comments = await fetchIssueComments({ token, repository, issueNumber: issue });
+    } catch (err) {
+      console.log(`⚠️ #${issue} のコメント取得に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
+    const kind = decideComment(lastBotCommentKind(comments), result.ok);
+    if (!kind) continue;
+
+    const body = kind === 'ng' ? buildNgComment({ url, result }) : buildOkComment({ url });
+    try {
+      await postIssueComment({ token, repository, issueNumber: issue, body });
+      console.log(`comment(${kind}): #${issue} に投稿しました`);
+    } catch (err) {
+      console.log(`⚠️ #${issue} へのコメント投稿に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
 async function main() {
   const token = process.env.GITHUB_TOKEN;
   const repository = process.env.GITHUB_REPOSITORY;
@@ -370,6 +491,15 @@ async function main() {
   console.log(`登録されたプラグイン: ${plugins.length}件（本文の最終編集日時が新しい順）`);
   for (const plugin of plugins) {
     console.log(`  #${plugin.issue} bodyUpdatedAt=${plugin.bodyUpdatedAt} ${plugin.name}`);
+  }
+
+  // 登録URLのCORS自動チェック。NGでも一覧からは消さず、説明の先頭にエラー表記を付ける。
+  let checkResults = [];
+  if (process.env.SKIP_URL_CHECK === '1') {
+    console.log('SKIP_URL_CHECK=1 のためURLチェックを省略します');
+  } else {
+    console.log('登録URLをチェックします');
+    checkResults = await annotatePlugins(plugins, { onLog: (m) => console.log(`  ${m}`) });
   }
 
   const outPath = path.resolve(process.cwd(), 'registry.json');
@@ -396,6 +526,10 @@ async function main() {
 
   await writeFile(outPath, `${JSON.stringify(registry, null, 2)}\n`, 'utf8');
   console.log(`書き出しました: ${outPath}`);
+
+  if (checkResults.length > 0 && process.env.SKIP_ISSUE_COMMENTS !== '1') {
+    await syncIssueComments({ token, repository, results: checkResults });
+  }
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;

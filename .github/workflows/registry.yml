@@ -7,7 +7,8 @@ on:
 
 permissions:
   contents: write
-  issues: read
+  # CORSチェックの結果をIssueにコメントするため write が必要
+  issues: write
 
 concurrency:
   group: build-registry
