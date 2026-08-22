@@ -1,7 +1,18 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-22T01:21:31.034Z",
+  "updatedAt": "2026-08-22T02:20:12.486Z",
   "plugins": [
+    {
+      "issue": 4,
+      "name": "g2_helloworld",
+      "url": "https://sabowl.sakura.ne.jp/g2/helloworld/",
+      "description": "スマホから任意のテキストを入れて表示するアプリ\nhttps://qiita.com/gpsnmeajp/items/89b5a3b94cd1fbf6af5d",
+      "author": "gpsnmeajp",
+      "githubUser": "gpsnmeajp",
+      "createdAt": "2026-08-22T02:19:57Z",
+      "updatedAt": "2026-08-22T02:19:57Z",
+      "bodyUpdatedAt": "2026-08-22T02:19:57Z"
+    },
     {
       "issue": 2,
       "name": "試作レティクル",
