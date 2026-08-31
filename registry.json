@@ -1,7 +1,18 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-22T02:20:12.486Z",
+  "updatedAt": "2026-08-31T06:01:03.796Z",
   "plugins": [
+    {
+      "issue": 5,
+      "name": "HRZ酔い止め",
+      "url": "https://hzn-g2.spicy-cup-4319.chatgpt.site/plugin",
+      "description": "液体が水平線を見せてくれる酔い止め眼鏡をプラグインで再現。\n本当に酔うは物理で買う方がいいよ！",
+      "author": "3mintimer",
+      "githubUser": "3mintimer",
+      "createdAt": "2026-08-31T06:00:47Z",
+      "updatedAt": "2026-08-31T06:00:47Z",
+      "bodyUpdatedAt": "2026-08-31T06:00:47Z"
+    },
     {
       "issue": 4,
       "name": "g2_helloworld",
