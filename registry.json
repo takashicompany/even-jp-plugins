@@ -1,18 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-23T04:09:06.453Z",
+  "updatedAt": "2026-10-23T04:17:51.969Z",
   "plugins": [
-    {
-      "issue": 6,
-      "name": "任意テキスト",
-      "url": "https://qiita.com/gpsnmeajp/items/89b5a3b94cd1fbf6af5d",
-      "description": "【エラー: ホスティングがCORS未対応のため起動できません】任意テキスト",
-      "author": "kanaya111",
-      "githubUser": "kanaya111",
-      "createdAt": "2026-10-23T04:08:36Z",
-      "updatedAt": "2026-10-23T04:08:51Z",
-      "bodyUpdatedAt": "2026-10-23T04:08:36Z"
-    },
     {
       "issue": 5,
       "name": "HRZ酔い止め",
