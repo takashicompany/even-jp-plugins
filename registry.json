@@ -1,7 +1,18 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-23T04:17:51.969Z",
+  "updatedAt": "2026-11-19T13:19:22.162Z",
   "plugins": [
+    {
+      "issue": 8,
+      "name": "G検定 4択クイズ",
+      "url": "https://azek-dev.github.io/g-kentei-quiz-g2/",
+      "description": "G検定（JDLA Deep Learning for GENERAL）向けの4択クイズです（自作50問）。リングでスクロールして A〜D を選んで解きます。答えたあとの「取り消し」で選び直し、5問ごとの区切り、いつでも「終了」ができます。成績は Even アプリ内に保存します。問題はすべて自作で、JDLA の公式問題ではありません。\nソース: https://github.com/azek-dev/g-kentei-quiz-g2",
+      "author": "azek-dev",
+      "githubUser": "azek-dev",
+      "createdAt": "2026-11-19T13:19:06Z",
+      "updatedAt": "2026-11-19T13:19:06Z",
+      "bodyUpdatedAt": "2026-11-19T13:19:06Z"
+    },
     {
       "issue": 5,
       "name": "HRZ酔い止め",
